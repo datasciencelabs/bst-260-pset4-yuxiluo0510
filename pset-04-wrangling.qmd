@@ -250,11 +250,9 @@ deaths_raw <- resp_body_json(resp, simplifyVector = TRUE) |>
   as_tibble()
 # keep state-level totals (no sex/age breakdown), and tidy
 deaths <- deaths_raw |>
-  transmute(
-    state,
-    date   = ymd(str_sub(end_date, 1, 10)),
-    deaths = as.numeric(covid_19_deaths)
-  ) |>
+  transmute(state,
+            date   = ymd(str_sub(end_date, 1, 10)),
+            deaths = as.numeric(covid_19_deaths)) |>
   arrange(state, date)
 ```
 
