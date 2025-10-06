@@ -149,9 +149,9 @@ regions <- map_df(raw_list, \(r) tibble(
   region      = as.integer(r$region),
   region_name = r$region_name)) |>
   # shorten long region name
-  mutate(region_name = if_else(
-    str_detect(region_name, regex("Affiliated\\s*Pacific", ignore_case = TRUE)),
-    "USAPI", region_name)) |>
+  mutate(region_name = case_when(
+    str_detect(region_name, regex("^New York and New Jersey", ignore_case = TRUE)) ~
+        "NY/NJ, PR & VI", TRUE ~ region_name)) |>
   # keep only 52 rows (50 + DC + PR)
   filter(state_name %in% valid_states)
 ```
@@ -159,19 +159,19 @@ regions <- map_df(raw_list, \(r) tibble(
 9. Add a region and region name columns to the `population` data frame.
 
 ```{r}
+# use left_join() to add regions to population
 population <- population |> left_join(regions, by = "state_name")
 ```
 
-
 10. From reading <https://data.cdc.gov/> we learn the endpoint `https://data.cdc.gov/resource/pwn4-m3yp.json` provides state level data from SARS-COV2 cases. Use the **httr2** tools you have learned to download this into a data frame. Is all the data there? If not, comment on why.
-
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-
 req <- request(api)
 resp <- req_perform(req)
 cases_raw <- resp_body_json(resp, simplifyVector = TRUE) |> as_tibble()
+# see how many rows
+nrow(cases_raw)
 ```
 
 Comments: No, not all the data is there. The CDC Socrata API only returns 1,000 rows by default, so the dataset is truncated unless you explicitly use $limit$ and $offset$ to retrieve all rows.
@@ -182,23 +182,21 @@ We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-
+# change limit
 resp <- request(api) |>
   req_url_query(`$limit` = 10000000000) |>
   req_perform()
 cases_raw <- resp_body_json(resp, simplifyVector = TRUE) |>
   as_tibble()
-
 cases <- cases_raw |>
-  transmute(
-    state,
-    # keep as character, strip off the time part after "T"
-    date  = str_sub(end_date, 1, 10),
-    cases = parse_double(new_cases)
-  ) |>
+  transmute(state,
+            # keep as character, strip off the time part after "T"
+            date  = str_sub(end_date, 1, 10),
+            cases = parse_double(new_cases)) |>
   arrange(state, date)
+# see few rows
+head(cases)
 ```
-
 
 12. For 2020 and 2021, make a time series plot of cases per 100,000 versus time for each state. Stratify the plot by region name. Make sure to label you graph appropriately. 
 
@@ -206,24 +204,18 @@ cases <- cases_raw |>
 cases |>
   filter(date >= "2020-01-01", date <= "2021-12-31") |>
   mutate(year = as.integer(substr(date, 1, 4))) |>
-  inner_join(
-    population |> select(state, year, population, region_name) |> distinct(),
-    by = c("state","year")
-  ) |>
+  inner_join(population |> select(state, year, population, region_name) |> distinct(),
+             by = c("state","year")) |>
   filter(!is.na(region_name)) |>
-  mutate(
-    date = as.Date(date),                   # temporary for plotting
-    rate_100k = 1e5 * cases / population
-  ) |>
+  mutate(date = as.Date(date),
+         rate_100k = 1e5 * cases / population) |>
   ggplot(aes(x = date, y = rate_100k, color = state, group = state)) +
   geom_line(alpha = 0.7, linewidth = 0.35) +
   facet_wrap(~ region_name, ncol = 3, scales = "free_y") +
-  labs(
-    title = "Weekly COVID-19 Cases per 100,000 by Region (2020–2021)",
-    subtitle = "State-level rates using CDC cases and Census PEP population",
-    x = "Week ending",
-    y = "Cases per 100,000"
-  ) 
+  labs(title = "Weekly COVID-19 Cases per 100,000 by Region (2020–2021)",
+       subtitle = "State-level rates using CDC cases and Census PEP population",
+       x = "Week ending",
+       y = "Cases per 100,000") 
 ```
 
 13. The dates in the `cases` dataset are stored as character strings. Use the **lubridate** package to properly parse the `date` column, then create a summary table showing the total COVID-19 cases by month and year for 2020 and 2021. The table should have columns for year, month (as month name), and total cases across all states. Order by year and month. Use the **knitr** package and `kable()` function to display the results as a formatted table.
@@ -254,10 +246,8 @@ Use **httr2** to download COVID-19 death data from this endpoint. Make sure to r
 resp <- request(deaths_url) |>
   req_url_query(`$limit` = 1000000000) |>
   req_perform()
-
 deaths_raw <- resp_body_json(resp, simplifyVector = TRUE) |>
   as_tibble()
-
 # keep state-level totals (no sex/age breakdown), and tidy
 deaths <- deaths_raw |>
   transmute(
